@@ -1,6 +1,13 @@
+use std::collections::HashMap;
+
 #[derive(Debug)]
-pub struct MessageQueue {
-    log: Vec<Message>,
+pub struct Broker {
+    topics: HashMap<String, Log>,
+}
+
+#[derive(Debug)]
+pub struct Log {
+    messages: Vec<Message>,
     next_offset: u64,
 }
 
@@ -10,18 +17,54 @@ pub struct Message {
     offset: u64,
 }
 
-impl MessageQueue {
+impl Broker {
+    pub fn new() -> Self {
+        let topics = HashMap::new();
+        Self { topics }
+    }
+
+    pub fn append(&mut self, topic: impl Into<String>, payload: impl Into<Vec<u8>>) -> u64 {
+        let topic = topic.into();
+        let payload = payload.into();
+
+        if !self.topics.contains_key(&topic) {
+            // if the topic does not exist, create it and insert a new log
+            let mut log = Log::new();
+            let offset = log.append(payload);
+
+            self.topics.insert(topic, log).unwrap();
+            return offset;
+        }
+
+        let log = self.topics.get_mut(&topic).unwrap(); // use Entry API later
+        let offset = log.append(payload);
+        offset
+    }
+
+    pub fn read_from(&self, topic: &str, offset: u64) -> Vec<Message>{
+        let messages = match self.topics.get(topic){
+            Some(log) => log.read_from(offset),
+            None => Vec::new()
+        };
+        messages
+    }
+}
+
+impl Log {
     pub fn new() -> Self {
         let log = Vec::new();
         let next_offset = 0;
-        Self { log, next_offset }
+        Self {
+            messages: log,
+            next_offset,
+        }
     }
 
     pub fn append(&mut self, payload: Vec<u8>) -> u64 {
         let offset = self.next_offset;
         let message = Message { payload, offset };
 
-        self.log.push(message);
+        self.messages.push(message);
         self.next_offset += 1;
         offset
     }
@@ -29,11 +72,11 @@ impl MessageQueue {
     pub fn read_from(&self, offset: u64) -> Vec<Message> {
         let mut messages = Vec::new();
 
-        if offset as usize > self.log.len() {
+        if offset as usize >= self.messages.len() {
             return messages;
         }
 
-        for msg in &self.log[offset as usize..] {
+        for msg in &self.messages[offset as usize..] {
             let msg = msg.clone();
             messages.push(msg);
         }
@@ -47,10 +90,10 @@ mod tests {
 
     #[test]
     fn append_increments_offset() {
-        let mut queue = MessageQueue::new();
+        let mut log = Log::new();
 
-        let o1 = queue.append(vec![1]);
-        let o2 = queue.append(vec![2]);
+        let o1 = log.append(vec![1]);
+        let o2 = log.append(vec![2]);
 
         assert_eq!(o1, 0);
         assert_eq!(o2, 1);
@@ -58,13 +101,13 @@ mod tests {
 
     #[test]
     fn read_from_returns_correct_slice() {
-        let mut queue = MessageQueue::new();
+        let mut log = Log::new();
 
-        queue.append(vec![1]);
-        queue.append(vec![2]);
-        queue.append(vec![3]);
+        log.append(vec![1]);
+        log.append(vec![2]);
+        log.append(vec![3]);
 
-        let msgs = queue.read_from(1);
+        let msgs = log.read_from(1);
 
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].offset, 1);
@@ -73,11 +116,11 @@ mod tests {
 
     #[test]
     fn read_from_future_offset_returns_empty() {
-        let mut queue = MessageQueue::new();
+        let mut log = Log::new();
 
-        queue.append(vec![1]);
+        log.append(vec![1]);
 
-        let msgs = queue.read_from(10);
+        let msgs = log.read_from(10);
 
         assert!(msgs.is_empty());
     }
