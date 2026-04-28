@@ -66,11 +66,12 @@ impl Broker {
 
         for entry in read_dir(path)? {
             let entry = entry?;
+            let path = entry.path();
             let topic = entry.file_name();
             let topic = topic
                 .into_string()
                 .map_err(|_| anyhow!("invalid topic name"))?;
-            let log = Log::try_new(&topic)?;
+            let log = Log::try_new(&path)?;
             topics.insert(topic, log);
         }
         Ok(topics)
