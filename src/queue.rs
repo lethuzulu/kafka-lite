@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::DirBuilder;
-use std::fs::{File, OpenOptions, create_dir_all, read_dir};
+use std::fs::{File, OpenOptions, read_dir};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -28,7 +28,7 @@ pub struct Log {
 impl Broker {
     pub fn try_new(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
-        let dir = DirBuilder::new().recursive(true).create(&path)?;
+        DirBuilder::new().recursive(true).create(&path)?;
 
         let topics = Self::replay_broker(&path)?;
 
