@@ -189,4 +189,26 @@ mod tests {
 
         assert!(msgs.is_empty());
     }
+
+    #[test]
+    fn broker_recovers_topics_after_restart() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+
+        {
+            let mut broker = Broker::try_new(dir.path()).unwrap();
+            broker.append("orders", b"msg1".to_vec()).unwrap();
+            broker.append("orders", b"msg2".to_vec()).unwrap();
+        }
+
+        // simulate restart
+        let broker = Broker::try_new(dir.path()).unwrap();
+
+        let msgs = broker.read_from("orders", 0);
+
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].offset, 0);
+        assert_eq!(msgs[1].offset, 1);
+    }
 }
