@@ -58,8 +58,22 @@ fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>) {
         }
         let request = match decode_request(&line) {
             Ok(r) => r,
-            Err(_) => {
-                eprintln!("error, failed to deserialize request");
+            Err(e) => {
+                eprintln!("error, failed to deserialize request: {}", e);
+
+                let err = ResponseKind::Err(ResponseError {message : "bad request".to_string()});
+
+                let res = match encode_response(err) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!("failure to serialize the response {}", e);
+                        break
+                    }
+                };
+                if let Err(e) =writer.write_all(res.as_bytes()) {
+                    eprintln!("failure to write to socket")
+                }
+                line.clear();
                 continue;
             }
         };
@@ -98,7 +112,7 @@ fn handle_request(req: Request, broker: &Arc<Mutex<Broker>>) -> ResponseKind {
         },
         Action::Commit {topic, consumer_id, offset} => {
             let  offset = broker.commit_offset(&topic, &consumer_id, offset);
-            ResponseKind::Ok(SuccessBody { 
+            ResponseKind::Ok(SuccessBody {
                 data: SuccessType::Commit {offset}
             })
         }

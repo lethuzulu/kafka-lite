@@ -29,5 +29,7 @@ pub struct ResponseError {
 }
 
 pub fn encode_response(res: ResponseKind) -> Result<String> {
-    Ok(serde_json::to_string(&res)?)
+    let mut res = serde_json::to_string(&res)?;
+    res.push('\n');
+    Ok(res)
 }

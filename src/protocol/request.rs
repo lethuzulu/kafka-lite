@@ -11,7 +11,7 @@ pub fn decode_request(req: &str) -> AnyhowResult<Request> {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "action", rename = "snake_case")]
+#[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
     Write {
         topic: String,
