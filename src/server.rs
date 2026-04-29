@@ -2,13 +2,13 @@ use crate::protocol::request::{Action, Request, decode_request};
 use crate::protocol::response::{
     ResponseError, ResponseKind, SuccessBody, SuccessType, encode_response,
 };
-use crate::queue::Broker;
 use anyhow::Result;
 use std::io::BufRead;
 use std::io::{BufReader, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use crate::store::broker::Broker;
 
 #[derive(Debug)]
 pub struct TcpServer {
@@ -33,10 +33,8 @@ impl TcpServer {
             match conn {
                 Ok(stream) => {
                     let broker = Arc::clone(&self.broker);
-                    thread::spawn(|| {
-                        handle_connection(stream, broker)
-                    });
-                },
+                    thread::spawn(|| handle_connection(stream, broker));
+                }
                 Err(_) => println!("error occurred. listening for next connection."),
             }
         }
@@ -92,10 +90,16 @@ fn handle_request(req: Request, broker: &Arc<Mutex<Broker>>) -> ResponseKind {
                 message: "internal error".into(),
             }),
         },
-        Action::Read { topic, offset } => {
-            let messages = broker.read_from(&topic, offset);
+        Action::Read { topic, consumer_id } => {
+            let (messages, next_offset) = broker.read_from(&topic, &consumer_id);
             ResponseKind::Ok(SuccessBody {
-                data: SuccessType::Read { messages },
+                data: SuccessType::Read { messages, next_offset },
+            })
+        },
+        Action::Commit {topic, consumer_id, offset} => {
+            let  offset = broker.commit_offset(&topic, &consumer_id, offset);
+            ResponseKind::Ok(SuccessBody { 
+                data: SuccessType::Commit {offset}
             })
         }
     }

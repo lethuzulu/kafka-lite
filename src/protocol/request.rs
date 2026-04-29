@@ -1,5 +1,5 @@
 use anyhow::Result as AnyhowResult;
-use serde::{Deserialize};
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct Request {
@@ -13,6 +13,14 @@ pub fn decode_request(req: &str) -> AnyhowResult<Request> {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "action", rename = "snake_case")]
 pub enum Action {
-    Write { topic: String, message: Vec<u8> },
-    Read { topic: String, offset: u64 },
+    Write {
+        topic: String,
+        message: Vec<u8>,
+    },
+    Read {
+        topic: String,
+        consumer_id: String,
+    },
+
+    Commit {topic: String, consumer_id: String, offset: u64}
 }
