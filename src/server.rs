@@ -7,11 +7,13 @@ use anyhow::Result;
 use std::io::BufRead;
 use std::io::{BufReader, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 #[derive(Debug)]
 pub struct TcpServer {
     inner: TcpListener,
-    broker: Broker,
+    broker: Arc<Mutex<Broker>>,
 }
 
 impl TcpServer {
@@ -19,23 +21,29 @@ impl TcpServer {
         let inner = TcpListener::bind(address)?;
 
         let broker = Broker::try_new("data")?;
+        let broker = Arc::new(Mutex::new(broker));
 
         println!("Tcp started...");
 
         Ok(Self { inner, broker })
     }
 
-    pub fn listen(&mut self) {
+    pub fn listen(&self) {
         for conn in self.inner.incoming() {
             match conn {
-                Ok(stream) => handle_connection(stream, &mut self.broker),
+                Ok(stream) => {
+                    let broker = Arc::clone(&self.broker);
+                    thread::spawn(|| {
+                        handle_connection(stream, broker)
+                    });
+                },
                 Err(_) => println!("error occurred. listening for next connection."),
             }
         }
     }
 }
 
-fn handle_connection(stream: TcpStream, broker: &mut Broker) {
+fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>) {
     let mut line = String::new();
 
     let mut writer = stream.try_clone().unwrap();
@@ -58,7 +66,7 @@ fn handle_connection(stream: TcpStream, broker: &mut Broker) {
             }
         };
 
-        let result = handle_request(request, broker);
+        let result = handle_request(request, &broker);
         let response = match encode_response(result) {
             Ok(response) => response,
             Err(e) => {
@@ -73,7 +81,8 @@ fn handle_connection(stream: TcpStream, broker: &mut Broker) {
     }
 }
 
-fn handle_request(req: Request, broker: &mut Broker) -> ResponseKind {
+fn handle_request(req: Request, broker: &Arc<Mutex<Broker>>) -> ResponseKind {
+    let mut broker = broker.lock().unwrap();
     match req.action {
         Action::Write { topic, message } => match broker.append(topic, message) {
             Ok(offset) => ResponseKind::Ok(SuccessBody {
