@@ -6,8 +6,6 @@ use std::fs::{File, OpenOptions, read_dir};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     payload: Vec<u8>,

@@ -6,10 +6,6 @@ pub struct Request {
     pub action: Action,
 }
 
-pub fn decode_request(req: &str) -> AnyhowResult<Request> {
-    Ok(serde_json::from_str(req)?)
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
@@ -21,6 +17,13 @@ pub enum Action {
         topic: String,
         consumer_id: String,
     },
+    Commit {
+        topic: String,
+        consumer_id: String,
+        offset: u64,
+    },
+}
 
-    Commit {topic: String, consumer_id: String, offset: u64}
+pub fn decode_request(req: &str) -> AnyhowResult<Request> {
+    Ok(serde_json::from_str(req)?)
 }

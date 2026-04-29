@@ -2,13 +2,13 @@ use crate::protocol::request::{Action, Request, decode_request};
 use crate::protocol::response::{
     ResponseError, ResponseKind, SuccessBody, SuccessType, encode_response,
 };
+use crate::store::broker::Broker;
 use anyhow::Result;
 use std::io::BufRead;
 use std::io::{BufReader, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use crate::store::broker::Broker;
 
 #[derive(Debug)]
 pub struct TcpServer {
@@ -20,7 +20,7 @@ impl TcpServer {
     pub fn try_new(address: impl ToSocketAddrs) -> Result<Self> {
         let inner = TcpListener::bind(address)?;
 
-        let broker = Broker::try_new("data")?;
+        let broker = Broker::try_new("data", "offsets")?;
         let broker = Arc::new(Mutex::new(broker));
 
         println!("Tcp started...");
@@ -61,16 +61,18 @@ fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>) {
             Err(e) => {
                 eprintln!("error, failed to deserialize request: {}", e);
 
-                let err = ResponseKind::Err(ResponseError {message : "bad request".to_string()});
+                let err = ResponseKind::Err(ResponseError {
+                    message: "bad request".to_string(),
+                });
 
                 let res = match encode_response(err) {
                     Ok(v) => v,
                     Err(e) => {
                         eprintln!("failure to serialize the response {}", e);
-                        break
+                        break;
                     }
                 };
-                if let Err(e) =writer.write_all(res.as_bytes()) {
+                if let Err(e) = writer.write_all(res.as_bytes()) {
                     eprintln!("failure to write to socket")
                 }
                 line.clear();
@@ -107,13 +109,20 @@ fn handle_request(req: Request, broker: &Arc<Mutex<Broker>>) -> ResponseKind {
         Action::Read { topic, consumer_id } => {
             let (messages, next_offset) = broker.read_from(&topic, &consumer_id);
             ResponseKind::Ok(SuccessBody {
-                data: SuccessType::Read { messages, next_offset },
+                data: SuccessType::Read {
+                    messages,
+                    next_offset,
+                },
             })
-        },
-        Action::Commit {topic, consumer_id, offset} => {
-            let  offset = broker.commit_offset(&topic, &consumer_id, offset);
+        }
+        Action::Commit {
+            topic,
+            consumer_id,
+            offset,
+        } => {
+            let offset = broker.commit_offset(&topic, &consumer_id, offset);
             ResponseKind::Ok(SuccessBody {
-                data: SuccessType::Commit {offset}
+                data: SuccessType::Commit { offset },
             })
         }
     }
