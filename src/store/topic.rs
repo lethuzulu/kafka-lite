@@ -1,40 +1,62 @@
 use std::collections::HashMap;
-use std::fs::read_dir;
-use std::path::Path;
+use std::fs::{read_dir, remove_file};
+use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Result};
 use crate::store::log::{Log, Message};
 
 
 #[derive(Debug)]
-pub struct Topics (HashMap<String, Log>);
+pub struct Topics {
+    logs: HashMap<String, Log>,
+    path: PathBuf,
+}
 
 impl Topics {
 
     pub fn new(path: impl AsRef<Path>) -> Self {
-        let topics = match Self::replay_topics(path) {
+        let path = path.as_ref().to_path_buf();
+        let logs = match Self::replay_topics(&path) {
             Ok(topics) => topics,
             Err(e) => {
                 eprintln!("failed to rebuild topics {}", e);
-                HashMap::<String, Log>::new()
+                HashMap::new()
             }
         };
 
-        Self(topics)
+        Self { logs, path }
     }
 
-    pub fn append(&mut self, topic: &str, payload: &[u8]) -> Result<u64>{
-        let log = self.0.get_mut(topic).ok_or_else(|| anyhow!("topic '{}' does not exist", topic))?;
+    pub fn create(&mut self, name: &str) -> Result<()> {
+        if self.logs.contains_key(name) {
+            return Err(anyhow!("topic '{}' already exists", name));
+        }
+        let log = Log::try_new(self.path.join(name))?;
+        self.logs.insert(name.to_string(), log);
+        Ok(())
+    }
+
+    pub fn list(&self) -> Vec<String> {
+        self.logs.keys().cloned().collect()
+    }
+
+    pub fn delete(&mut self, name: &str) -> Result<()> {
+        if self.logs.remove(name).is_none() {
+            return Err(anyhow!("topic '{}' does not exist", name));
+        }
+        remove_file(self.path.join(name))?;
+        Ok(())
+    }
+
+    pub fn append(&mut self, topic: &str, payload: &[u8]) -> Result<u64> {
+        let log = self.logs.get_mut(topic).ok_or_else(|| anyhow!("topic '{}' does not exist", topic))?;
         let offset = log.append(payload)?;
         Ok(offset)
     }
 
-    pub fn read_from(&self, topic: &str, offset: u64) -> Option<Vec<Message>>{
-        match self.0.get(topic){
-            Some(log) => {
-                let messages = log.read_from(offset);
-                Some(messages)
-            },
-            None => None
+    pub fn read_from(&self, topic: &str, offset: u64) -> Option<Vec<Message>> {
+        match self.logs.get(topic) {
+            Some(log) => Some(log.read_from(offset)),
+            None => None,
         }
     }
 
@@ -45,6 +67,9 @@ impl Topics {
 
         for entry in topic_dir {
             let topic = entry?;
+            if !topic.file_type()?.is_file() {
+                continue;
+            }
             let topic_path = topic.path();
             let topic_name = topic.file_name();
             let topic = topic_name.into_string().map_err(|_| anyhow!("invalid topic name"))?;
@@ -53,8 +78,4 @@ impl Topics {
         }
         Ok(topics)
     }
-
-    fn list() {}
-    fn create(){}
-    fn delete(){}
 }

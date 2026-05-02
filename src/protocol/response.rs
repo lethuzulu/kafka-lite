@@ -27,6 +27,15 @@ pub enum SuccessType {
     Commit {
         offset: u64,
     },
+    CreateTopic {
+        name: String,
+    },
+    ListTopics {
+        topics: Vec<String>,
+    },
+    DeleteTopic {
+        name: String,
+    },
 }
 
 #[derive(Debug, Serialize)]

@@ -22,9 +22,13 @@ pub enum Action {
         consumer_id: String,
         offset: u64,
     },
-    // CreateTopic {
-    //
-    // }
+    CreateTopic {
+        name: String,
+    },
+    ListTopics,
+    DeleteTopic {
+        name: String,
+    },
 }
 
 pub fn decode_request(req: &str) -> Result<Request> {

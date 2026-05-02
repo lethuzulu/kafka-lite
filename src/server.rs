@@ -135,5 +135,23 @@ fn handle_request(req: Request, broker: &Arc<Mutex<Broker>>) -> ResponseKind {
                 data: SuccessType::Commit { offset },
             })
         }
+        Action::CreateTopic { name } => match broker.create_topic(&name) {
+            Ok(()) => ResponseKind::Ok(SuccessBody {
+                data: SuccessType::CreateTopic { name },
+            }),
+            Err(e) => ResponseKind::Err(ResponseError { message: e.to_string() }),
+        },
+        Action::ListTopics => {
+            let topics = broker.list_topics();
+            ResponseKind::Ok(SuccessBody {
+                data: SuccessType::ListTopics { topics },
+            })
+        }
+        Action::DeleteTopic { name } => match broker.delete_topic(&name) {
+            Ok(()) => ResponseKind::Ok(SuccessBody {
+                data: SuccessType::DeleteTopic { name },
+            }),
+            Err(e) => ResponseKind::Err(ResponseError { message: e.to_string() }),
+        },
     }
 }
