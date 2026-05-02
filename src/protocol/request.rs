@@ -29,6 +29,11 @@ pub enum Action {
     DeleteTopic {
         name: String,
     },
+    Seek {
+        topic: String,
+        consumer_id: String,
+        offset: u64,
+    },
 }
 
 pub fn decode_request(req: &str) -> Result<Request> {

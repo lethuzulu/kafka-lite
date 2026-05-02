@@ -36,6 +36,9 @@ pub enum SuccessType {
     DeleteTopic {
         name: String,
     },
+    Seek {
+        offset: u64,
+    },
 }
 
 #[derive(Debug, Serialize)]

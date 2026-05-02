@@ -47,18 +47,24 @@ impl Broker {
     }
 
     pub fn read_from(&self, topic: &str, consumer_id: &str) -> Result<ReadResult> {
-        let offset = self.offsets.get_offset(topic, consumer_id).unwrap_or(0);
-        let messages = self.topics.read_from(topic, offset);
-        match messages {
-            Some(messages) => {
-                let next_offset = messages.last().map(|m| m.offset + 1).unwrap_or(0);
-                Ok(ReadResult { messages, next_offset })
-            }
-            None => Err(anyhow!("topic '{}' does not exist", topic)),
-        }
+        let latest = self.topics.latest_offset(topic)
+            .ok_or_else(|| anyhow!("topic '{}' does not exist", topic))?;
+        let offset = self.offsets.get_offset(topic, consumer_id).unwrap_or(latest);
+        let messages = self.topics.read_from(topic, offset).unwrap_or_default();
+        let next_offset = messages.last().map(|m| m.offset + 1).unwrap_or(latest);
+        Ok(ReadResult { messages, next_offset })
     }
 
-    pub fn commit_offset(&mut self, topic: &str, consumer_id: &str, offset: u64) -> u64 {
+    pub fn seek(&mut self, topic: &str, consumer_id: &str, offset: u64) -> Result<u64> {
+        let latest = self.topics.latest_offset(topic)
+            .ok_or_else(|| anyhow!("topic '{}' does not exist", topic))?;
+        if offset > latest {
+            return Err(anyhow!("offset {} is out of range, topic '{}' has {} messages", offset, topic, latest));
+        }
+        self.offsets.commit_offset(topic, consumer_id, offset)
+    }
+
+    pub fn commit_offset(&mut self, topic: &str, consumer_id: &str, offset: u64) -> Result<u64> {
         self.offsets.commit_offset(topic, consumer_id, offset)
     }
 }

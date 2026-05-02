@@ -129,12 +129,12 @@ fn handle_request(req: Request, broker: &Arc<Mutex<Broker>>) -> ResponseKind {
             topic,
             consumer_id,
             offset,
-        } => {
-            let offset = broker.commit_offset(&topic, &consumer_id, offset);
-            ResponseKind::Ok(SuccessBody {
+        } => match broker.commit_offset(&topic, &consumer_id, offset) {
+            Ok(offset) => ResponseKind::Ok(SuccessBody {
                 data: SuccessType::Commit { offset },
-            })
-        }
+            }),
+            Err(e) => ResponseKind::Err(ResponseError { message: e.to_string() }),
+        },
         Action::CreateTopic { name } => match broker.create_topic(&name) {
             Ok(()) => ResponseKind::Ok(SuccessBody {
                 data: SuccessType::CreateTopic { name },
@@ -153,5 +153,13 @@ fn handle_request(req: Request, broker: &Arc<Mutex<Broker>>) -> ResponseKind {
             }),
             Err(e) => ResponseKind::Err(ResponseError { message: e.to_string() }),
         },
+        Action::Seek { topic, consumer_id, offset } => {
+            match broker.seek(&topic, &consumer_id, offset) {
+                Ok(offset) => ResponseKind::Ok(SuccessBody {
+                    data: SuccessType::Seek { offset },
+                }),
+                Err(e) => ResponseKind::Err(ResponseError { message: e.to_string() }),
+            }
+        }
     }
 }

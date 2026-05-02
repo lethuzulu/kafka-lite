@@ -50,6 +50,10 @@ impl Topics {
         Ok(offset)
     }
 
+    pub fn latest_offset(&self, topic: &str) -> Option<u64> {
+        self.logs.get(topic).map(|log| log.next_offset)
+    }
+
     pub fn read_from(&self, topic: &str, offset: u64) -> Option<Vec<Message>> {
         match self.logs.get(topic) {
             Some(log) => Some(log.read_from(offset)),
