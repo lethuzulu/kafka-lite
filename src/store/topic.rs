@@ -15,13 +15,10 @@ impl Topics {
 
     pub fn new(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref().to_path_buf();
-        let logs = match Self::replay_topics(&path) {
-            Ok(topics) => topics,
-            Err(e) => {
-                eprintln!("failed to rebuild topics {}", e);
-                HashMap::new()
-            }
-        };
+        let logs = Self::replay_topics(&path).unwrap_or_else(|e| {
+            eprintln!("failed to rebuild topics {}", e);
+            HashMap::new()
+        });
 
         Self { logs, path }
     }
@@ -40,10 +37,10 @@ impl Topics {
     }
 
     pub fn delete(&mut self, name: &str) -> Result<()> {
+        remove_file(self.path.join(name))?;
         if self.logs.remove(name).is_none() {
             return Err(anyhow!("topic '{}' does not exist", name));
         }
-        remove_file(self.path.join(name))?;
         Ok(())
     }
 

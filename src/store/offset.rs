@@ -30,24 +30,21 @@ impl Offsets {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
 
         let write_handle = OpenOptions::new().append(true).create(true).open(&path)?;
-        let offsets = match Self::replay_offsets(path)    {
-            Ok(offsets) => offsets,
-            Err(e) => {
-                eprintln!("failed to rebuild offsets {}", e);
-                HashMap::<OffsetKey, u64>::new()
-            }
-        };
+        let offsets = Self::replay_offsets(path).unwrap_or_else(|e| {
+            eprintln!("failed to rebuild offsets {}", e);
+            HashMap::<OffsetKey, u64>::new()
+        });
 
         Ok(Self{offsets, write_handle})
     }
-    pub fn commit_offset(&mut self, topic: &str, consumer_id: &str, offset: u64) -> u64 {
+    pub fn commit_offset(&mut self, topic: &str, consumer_id: &str, offset: u64) -> Result<u64> {
         let offset_key = OffsetKey {topic: topic.into(), consumer_id: consumer_id.into()};
         let offset_entry = OffsetEntry { key: offset_key.clone(), value: offset };
 
-        self.append_offset_file(&offset_entry).unwrap();
+        self.append_offset_file(&offset_entry)?;
 
         self.offsets.insert(offset_key, offset);
-        offset
+        Ok(offset)
     }
 
     pub fn get_offset(&self, topic: impl Into<String>, consumer_id: impl Into<String>) -> Option<u64> {
