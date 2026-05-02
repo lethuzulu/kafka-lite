@@ -80,48 +80,49 @@ impl Log {
     }
 }
 // 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use tempfile::NamedTempFile;
-// 
-//     #[test]
-//     fn append_increments_offset() {
-//         let file = NamedTempFile::new().unwrap();
-//         let mut log = Log::try_new(file.path()).unwrap();
-// 
-//         let o1 = log.append(vec![1]).unwrap();
-//         let o2 = log.append(vec![2]).unwrap();
-// 
-//         assert_eq!(o1, 0);
-//         assert_eq!(o2, 1);
-//     }
-// 
-//     #[test]
-//     fn read_from_returns_correct_slice() {
-//         let file = NamedTempFile::new().unwrap();
-//         let mut log = Log::try_new(file.path()).unwrap();
-// 
-//         log.append(vec![1]).unwrap();
-//         log.append(vec![2]).unwrap();
-//         log.append(vec![3]).unwrap();
-// 
-//         let msgs = log.read_from(1);
-// 
-//         assert_eq!(msgs.len(), 2);
-//         assert_eq!(msgs[0].offset, 1);
-//         assert_eq!(msgs[1].offset, 2);
-//     }
-// 
-//     #[test]
-//     fn read_from_future_offset_returns_empty() {
-//         let file = NamedTempFile::new().unwrap();
-//         let mut log = Log::try_new(file.path()).unwrap();
-// 
-//         log.append(vec![1]).unwrap();
-// 
-//         let msgs = log.read_from(10);
-// 
-//         assert!(msgs.is_empty());
-//     }
-// }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn append_increments_offset() {
+        let file = NamedTempFile::new().unwrap();
+        let mut log = Log::try_new(file.path()).unwrap();
+
+        let o1 = log.append(&[1]).unwrap();
+        let o2 = log.append(&[2]).unwrap();
+
+        assert_eq!(o1, 0);
+        assert_eq!(o2, 1);
+    }
+
+    #[test]
+    fn read_from_returns_correct_slice() {
+        let file = NamedTempFile::new().unwrap();
+        let mut log = Log::try_new(file.path()).unwrap();
+
+        log.append(&[1]).unwrap();
+        log.append(&[2]).unwrap();
+        log.append(&[3]).unwrap();
+
+        let msgs = log.read_from(1);
+
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].offset, 1);
+        assert_eq!(msgs[1].offset, 2);
+    }
+
+    #[test]
+    fn read_from_future_offset_returns_empty() {
+        let file = NamedTempFile::new().unwrap();
+        let mut log = Log::try_new(file.path()).unwrap();
+
+        log.append(&[1]).unwrap();
+
+        let msgs = log.read_from(10);
+
+        assert!(msgs.is_empty());
+    }
+}

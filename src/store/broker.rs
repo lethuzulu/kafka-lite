@@ -68,3 +68,156 @@ impl Broker {
         self.offsets.commit_offset(topic, consumer_id, offset)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn setup(dir: &tempfile::TempDir) -> Broker {
+        Broker::try_new(dir.path()).unwrap()
+    }
+
+    #[test]
+    fn create_and_append_to_topic() {
+        let dir = tempdir().unwrap();
+        let mut broker = setup(&dir);
+
+        broker.create_topic("orders").unwrap();
+        let offset = broker.append("orders", b"hello").unwrap();
+
+        assert_eq!(offset, 0);
+    }
+
+    #[test]
+    fn append_to_nonexistent_topic_errors() {
+        let dir = tempdir().unwrap();
+        let mut broker = setup(&dir);
+
+        assert!(broker.append("ghost", b"data").is_err());
+    }
+
+    #[test]
+    fn list_topics_returns_created_topics() {
+        let dir = tempdir().unwrap();
+        let mut broker = setup(&dir);
+
+        broker.create_topic("orders").unwrap();
+        broker.create_topic("payments").unwrap();
+
+        let mut list = broker.list_topics();
+        list.sort();
+        assert_eq!(list, vec!["orders", "payments"]);
+    }
+
+    #[test]
+    fn delete_topic_removes_it() {
+        let dir = tempdir().unwrap();
+        let mut broker = setup(&dir);
+
+        broker.create_topic("orders").unwrap();
+        broker.delete_topic("orders").unwrap();
+
+        assert!(broker.list_topics().is_empty());
+    }
+
+    #[test]
+    fn new_consumer_defaults_to_latest_offset() {
+        let dir = tempdir().unwrap();
+        let mut broker = setup(&dir);
+
+        broker.create_topic("orders").unwrap();
+        broker.append("orders", b"msg1").unwrap();
+        broker.append("orders", b"msg2").unwrap();
+
+        // new consumer — no committed offset — should default to latest and get nothing
+        let result = broker.read_from("orders", "svc-new").unwrap();
+        assert!(result.messages.is_empty());
+    }
+
+    #[test]
+    fn consumer_reads_from_committed_offset() {
+        let dir = tempdir().unwrap();
+        let mut broker = setup(&dir);
+
+        broker.create_topic("orders").unwrap();
+        broker.append("orders", b"msg1").unwrap();
+        broker.append("orders", b"msg2").unwrap();
+        broker.append("orders", b"msg3").unwrap();
+
+        broker.commit_offset("orders", "svc-a", 1).unwrap();
+
+        let result = broker.read_from("orders", "svc-a").unwrap();
+        assert_eq!(result.messages.len(), 2);
+        assert_eq!(result.messages[0].offset, 1);
+        assert_eq!(result.messages[1].offset, 2);
+    }
+
+    #[test]
+    fn consumers_are_independent() {
+        let dir = tempdir().unwrap();
+        let mut broker = setup(&dir);
+
+        broker.create_topic("orders").unwrap();
+        broker.append("orders", b"msg1").unwrap();
+        broker.append("orders", b"msg2").unwrap();
+        broker.append("orders", b"msg3").unwrap();
+
+        broker.commit_offset("orders", "svc-a", 0).unwrap();
+        broker.commit_offset("orders", "svc-b", 2).unwrap();
+
+        let result_a = broker.read_from("orders", "svc-a").unwrap();
+        let result_b = broker.read_from("orders", "svc-b").unwrap();
+
+        assert_eq!(result_a.messages.len(), 3);
+        assert_eq!(result_b.messages.len(), 1);
+    }
+
+    #[test]
+    fn seek_changes_consumer_position() {
+        let dir = tempdir().unwrap();
+        let mut broker = setup(&dir);
+
+        broker.create_topic("orders").unwrap();
+        broker.append("orders", b"msg1").unwrap();
+        broker.append("orders", b"msg2").unwrap();
+        broker.append("orders", b"msg3").unwrap();
+
+        broker.seek("orders", "svc-a", 0).unwrap();
+
+        let result = broker.read_from("orders", "svc-a").unwrap();
+        assert_eq!(result.messages.len(), 3);
+        assert_eq!(result.messages[0].offset, 0);
+    }
+
+    #[test]
+    fn seek_out_of_range_returns_error() {
+        let dir = tempdir().unwrap();
+        let mut broker = setup(&dir);
+
+        broker.create_topic("orders").unwrap();
+        broker.append("orders", b"msg1").unwrap();
+
+        assert!(broker.seek("orders", "svc-a", 99).is_err());
+    }
+
+    #[test]
+    fn broker_recovers_topics_and_offsets_after_restart() {
+        let dir = tempdir().unwrap();
+
+        {
+            let mut broker = setup(&dir);
+            broker.create_topic("orders").unwrap();
+            broker.append("orders", b"msg1").unwrap();
+            broker.append("orders", b"msg2").unwrap();
+            broker.commit_offset("orders", "svc-a", 1).unwrap();
+        }
+
+        let broker = Broker::try_new(dir.path()).unwrap();
+
+        // messages survived restart
+        let result = broker.read_from("orders", "svc-a").unwrap();
+        assert_eq!(result.messages.len(), 1);
+        assert_eq!(result.messages[0].offset, 1);
+    }
+}

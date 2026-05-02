@@ -81,3 +81,110 @@ impl Topics {
         Ok(topics)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn create_topic_and_append() {
+        let dir = tempdir().unwrap();
+        let mut topics = Topics::new(dir.path());
+
+        topics.create("orders").unwrap();
+        let offset = topics.append("orders", b"hello").unwrap();
+
+        assert_eq!(offset, 0);
+    }
+
+    #[test]
+    fn create_duplicate_topic_returns_error() {
+        let dir = tempdir().unwrap();
+        let mut topics = Topics::new(dir.path());
+
+        topics.create("orders").unwrap();
+        assert!(topics.create("orders").is_err());
+    }
+
+    #[test]
+    fn append_to_nonexistent_topic_returns_error() {
+        let dir = tempdir().unwrap();
+        let mut topics = Topics::new(dir.path());
+
+        assert!(topics.append("ghost", b"data").is_err());
+    }
+
+    #[test]
+    fn list_topics_returns_all_created() {
+        let dir = tempdir().unwrap();
+        let mut topics = Topics::new(dir.path());
+
+        topics.create("orders").unwrap();
+        topics.create("payments").unwrap();
+
+        let mut list = topics.list();
+        list.sort();
+        assert_eq!(list, vec!["orders", "payments"]);
+    }
+
+    #[test]
+    fn delete_topic_removes_it() {
+        let dir = tempdir().unwrap();
+        let mut topics = Topics::new(dir.path());
+
+        topics.create("orders").unwrap();
+        topics.delete("orders").unwrap();
+
+        assert!(topics.list().is_empty());
+    }
+
+    #[test]
+    fn latest_offset_reflects_appends() {
+        let dir = tempdir().unwrap();
+        let mut topics = Topics::new(dir.path());
+
+        topics.create("orders").unwrap();
+        assert_eq!(topics.latest_offset("orders"), Some(0));
+
+        topics.append("orders", b"msg1").unwrap();
+        assert_eq!(topics.latest_offset("orders"), Some(1));
+
+        topics.append("orders", b"msg2").unwrap();
+        assert_eq!(topics.latest_offset("orders"), Some(2));
+    }
+
+    #[test]
+    fn read_from_returns_correct_messages() {
+        let dir = tempdir().unwrap();
+        let mut topics = Topics::new(dir.path());
+
+        topics.create("orders").unwrap();
+        topics.append("orders", b"first").unwrap();
+        topics.append("orders", b"second").unwrap();
+        topics.append("orders", b"third").unwrap();
+
+        let msgs = topics.read_from("orders", 1).unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].offset, 1);
+        assert_eq!(msgs[1].offset, 2);
+    }
+
+    #[test]
+    fn topics_replay_on_restart() {
+        let dir = tempdir().unwrap();
+
+        {
+            let mut topics = Topics::new(dir.path());
+            topics.create("orders").unwrap();
+            topics.append("orders", b"msg1").unwrap();
+            topics.append("orders", b"msg2").unwrap();
+        }
+
+        let topics = Topics::new(dir.path());
+        let msgs = topics.read_from("orders", 0).unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].offset, 0);
+        assert_eq!(msgs[1].offset, 1);
+    }
+}

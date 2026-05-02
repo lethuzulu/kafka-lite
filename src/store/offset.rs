@@ -82,3 +82,81 @@ impl Offsets {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn commit_and_get_offset() {
+        let file = NamedTempFile::new().unwrap();
+        let mut offsets = Offsets::new(file.path()).unwrap();
+
+        offsets.commit_offset("orders", "svc-a", 5).unwrap();
+
+        assert_eq!(offsets.get_offset("orders", "svc-a"), Some(5));
+    }
+
+    #[test]
+    fn get_offset_returns_none_for_unknown_consumer() {
+        let file = NamedTempFile::new().unwrap();
+        let offsets = Offsets::new(file.path()).unwrap();
+
+        assert_eq!(offsets.get_offset("orders", "svc-unknown"), None);
+    }
+
+    #[test]
+    fn commit_offset_overwrites_previous() {
+        let file = NamedTempFile::new().unwrap();
+        let mut offsets = Offsets::new(file.path()).unwrap();
+
+        offsets.commit_offset("orders", "svc-a", 3).unwrap();
+        offsets.commit_offset("orders", "svc-a", 7).unwrap();
+
+        assert_eq!(offsets.get_offset("orders", "svc-a"), Some(7));
+    }
+
+    #[test]
+    fn offsets_are_isolated_per_consumer() {
+        let file = NamedTempFile::new().unwrap();
+        let mut offsets = Offsets::new(file.path()).unwrap();
+
+        offsets.commit_offset("orders", "svc-a", 10).unwrap();
+        offsets.commit_offset("orders", "svc-b", 2).unwrap();
+
+        assert_eq!(offsets.get_offset("orders", "svc-a"), Some(10));
+        assert_eq!(offsets.get_offset("orders", "svc-b"), Some(2));
+    }
+
+    #[test]
+    fn offsets_survive_restart() {
+        let file = NamedTempFile::new().unwrap();
+
+        {
+            let mut offsets = Offsets::new(file.path()).unwrap();
+            offsets.commit_offset("orders", "svc-a", 4).unwrap();
+            offsets.commit_offset("payments", "svc-b", 9).unwrap();
+        }
+
+        let offsets = Offsets::new(file.path()).unwrap();
+        assert_eq!(offsets.get_offset("orders", "svc-a"), Some(4));
+        assert_eq!(offsets.get_offset("payments", "svc-b"), Some(9));
+    }
+
+    #[test]
+    fn latest_commit_wins_on_replay() {
+        let file = NamedTempFile::new().unwrap();
+
+        {
+            let mut offsets = Offsets::new(file.path()).unwrap();
+            offsets.commit_offset("orders", "svc-a", 1).unwrap();
+            offsets.commit_offset("orders", "svc-a", 5).unwrap();
+            offsets.commit_offset("orders", "svc-a", 3).unwrap();
+        }
+
+        let offsets = Offsets::new(file.path()).unwrap();
+        // last written entry wins on replay (last-write-wins)
+        assert_eq!(offsets.get_offset("orders", "svc-a"), Some(3));
+    }
+}
