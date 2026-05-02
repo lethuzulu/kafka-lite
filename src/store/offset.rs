@@ -4,6 +4,7 @@ use std::path::Path;
 use std::io::{BufRead, Read, Write};
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
+use log::error;
 use std::fs::File;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Hash, Eq, PartialEq)]
@@ -31,7 +32,7 @@ impl Offsets {
 
         let write_handle = OpenOptions::new().append(true).create(true).open(&path)?;
         let offsets = Self::replay_offsets(path).unwrap_or_else(|e| {
-            eprintln!("failed to rebuild offsets {}", e);
+            error!("failed to rebuild offsets {}", e);
             HashMap::<OffsetKey, u64>::new()
         });
 

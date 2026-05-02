@@ -1,14 +1,9 @@
 use anyhow::{Result};
-use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub payload: Vec<u8>,
-    pub  offset: u64,
-}
+pub use kafka_lite_protocol::Message;
 #[derive(Debug)]
 pub struct Log {
     pub messages: Vec<Message>,

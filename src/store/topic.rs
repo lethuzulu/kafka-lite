@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs::{read_dir, remove_file};
 use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Result};
+use log::error;
 use crate::store::log::{Log, Message};
 
 
@@ -16,7 +17,7 @@ impl Topics {
     pub fn new(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref().to_path_buf();
         let logs = Self::replay_topics(&path).unwrap_or_else(|e| {
-            eprintln!("failed to rebuild topics {}", e);
+            error!("failed to rebuild topics {}", e);
             HashMap::new()
         });
 

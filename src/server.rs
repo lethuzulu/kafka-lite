@@ -1,5 +1,5 @@
-use crate::protocol::request::{Action, Request, decode_request};
-use crate::protocol::response::{
+use kafka_lite_protocol::request::{Action, Request, decode_request};
+use kafka_lite_protocol::response::{
     ResponseError, ResponseKind, SuccessBody, SuccessType, encode_response,
 };
 use crate::store::broker::Broker;
@@ -10,6 +10,7 @@ use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use log::{error, info, warn};
 
 const LONG_POLL_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -26,7 +27,7 @@ impl TcpServer {
         let broker = Arc::new(Mutex::new(broker));
         let condvar = Arc::new(Condvar::new());
 
-        println!("Tcp started...");
+        info!("Tcp started...");
 
         Ok(Self { inner, broker, condvar })
     }
@@ -39,7 +40,7 @@ impl TcpServer {
                     let condvar = Arc::clone(&self.condvar);
                     thread::spawn(|| handle_connection(stream, broker, condvar));
                 }
-                Err(_) => println!("error occurred. listening for next connection."),
+                Err(e) => warn!("error occurred. listening for next connection: {}", e),
             }
         }
     }
@@ -51,7 +52,7 @@ fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>, condvar: Arc
     let mut writer = match stream.try_clone() {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("failed to clone stream: {}", e);
+            error!("failed to clone stream: {}", e);
             return;
         }
     };
@@ -62,14 +63,14 @@ fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>, condvar: Arc
             Ok(0) => break, //client disconnected
             Ok(_) => {}
             Err(e) => {
-                eprintln!("read error: {}", e);
+                error!("read error: {}", e);
                 break;
             }
         }
         let request = match decode_request(&line) {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("error, failed to deserialize request: {}", e);
+                warn!("error, failed to deserialize request: {}", e);
 
                 let err = ResponseKind::Err(ResponseError {
                     message: "bad request".to_string(),
@@ -78,12 +79,12 @@ fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>, condvar: Arc
                 let res = match encode_response(err) {
                     Ok(v) => v,
                     Err(e) => {
-                        eprintln!("failure to serialize the response {}", e);
+                        error!("failure to serialize the response {}", e);
                         break;
                     }
                 };
                 if let Err(e) = writer.write_all(res.as_bytes()) {
-                    eprintln!("failed to write to socket: {}", e);
+                    error!("failed to write to socket: {}", e);
                 }
                 line.clear();
                 continue;
@@ -94,12 +95,12 @@ fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>, condvar: Arc
         let response = match encode_response(result) {
             Ok(response) => response,
             Err(e) => {
-                eprintln!("failed to encode response: {}", e);
+                error!("failed to encode response: {}", e);
                 break;
             }
         };
         if let Err(e) = writer.write_all(response.as_bytes()) {
-            eprintln!("failed to write to socket: {}", e);
+            error!("failed to write to socket: {}", e);
         }
         line.clear()
     }
