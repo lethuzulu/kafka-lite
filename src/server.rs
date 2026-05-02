@@ -7,23 +7,28 @@ use anyhow::Result;
 use std::io::BufRead;
 use std::io::{BufReader, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
+
+const LONG_POLL_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug)]
 pub struct TcpServer {
     inner: TcpListener,
     broker: Arc<Mutex<Broker>>,
+    condvar: Arc<Condvar>,
 }
 
 impl TcpServer {
     pub fn try_new(address: impl ToSocketAddrs, broker: Broker) -> Result<Self> {
         let inner = TcpListener::bind(address)?;
         let broker = Arc::new(Mutex::new(broker));
+        let condvar = Arc::new(Condvar::new());
 
         println!("Tcp started...");
 
-        Ok(Self { inner, broker })
+        Ok(Self { inner, broker, condvar })
     }
 
     pub fn listen(&self) {
@@ -31,7 +36,8 @@ impl TcpServer {
             match conn {
                 Ok(stream) => {
                     let broker = Arc::clone(&self.broker);
-                    thread::spawn(|| handle_connection(stream, broker));
+                    let condvar = Arc::clone(&self.condvar);
+                    thread::spawn(|| handle_connection(stream, broker, condvar));
                 }
                 Err(_) => println!("error occurred. listening for next connection."),
             }
@@ -39,7 +45,7 @@ impl TcpServer {
     }
 }
 
-fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>) {
+fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>, condvar: Arc<Condvar>) {
     let mut line = String::new();
 
     let mut writer = match stream.try_clone() {
@@ -84,7 +90,7 @@ fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>) {
             }
         };
 
-        let result = handle_request(request, &broker);
+        let result = handle_request(request, &broker, &condvar);
         let response = match encode_response(result) {
             Ok(response) => response,
             Err(e) => {
@@ -99,29 +105,54 @@ fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>) {
     }
 }
 
-fn handle_request(req: Request, broker: &Arc<Mutex<Broker>>) -> ResponseKind {
-    let mut broker = broker.lock().unwrap_or_else(|e| e.into_inner());
+fn handle_request(req: Request, broker: &Arc<Mutex<Broker>>, condvar: &Arc<Condvar>) -> ResponseKind {
     match req.action {
-        Action::Write { topic, payload } => match broker.append(&topic, &payload) {
-            Ok(offset) => ResponseKind::Ok(SuccessBody {
-                data: SuccessType::Write { offset },
-            }),
-            Err(_) => ResponseKind::Err(ResponseError {
-                message: "internal error".into(),
-            }),
-        },
+        Action::Write { topic, payload } => {
+            let result = {
+                let mut broker = broker.lock().unwrap_or_else(|e| e.into_inner());
+                broker.append(&topic, &payload)
+            };
+            condvar.notify_all();
+            match result {
+                Ok(offset) => ResponseKind::Ok(SuccessBody {
+                    data: SuccessType::Write { offset },
+                }),
+                Err(_) => ResponseKind::Err(ResponseError {
+                    message: "internal error".into(),
+                }),
+            }
+        }
         Action::Read { topic, consumer_id } => {
-            match broker.read_from(&topic, &consumer_id) {
-                Ok(r ) => {
-                    ResponseKind::Ok(SuccessBody {
-                        data: SuccessType::Read {
-                            messages: r.messages,
-                            next_offset: r.next_offset
-                        }
-                    })
-                }
-                Err(_) => {
-                    ResponseKind::Err(ResponseError {message: "topic or consumer_id does not exist".to_string()})
+            let deadline = Instant::now() + LONG_POLL_TIMEOUT;
+            let mut guard = broker.lock().unwrap_or_else(|e| e.into_inner());
+            loop {
+                match guard.read_from(&topic, &consumer_id) {
+                    Err(_) => {
+                        return ResponseKind::Err(ResponseError {message: "topic or consumer_id does not exist".to_string()});
+                    }
+                    Ok(r) if !r.messages.is_empty() => {
+                        return ResponseKind::Ok(SuccessBody {
+                            data: SuccessType::Read {
+                                messages: r.messages,
+                                next_offset: r.next_offset
+                            }
+                        });
+                    }
+                    Ok(r) => {
+                        let remaining = match deadline.checked_duration_since(Instant::now()) {
+                            Some(d) => d,
+                            None => {
+                                return ResponseKind::Ok(SuccessBody {
+                                    data: SuccessType::Read {
+                                        messages: r.messages,
+                                        next_offset: r.next_offset
+                                    }
+                                });
+                            }
+                        };
+                        let (new_guard, _) = condvar.wait_timeout(guard, remaining).unwrap_or_else(|e| e.into_inner());
+                        guard = new_guard;
+                    }
                 }
             }
         }
@@ -129,31 +160,42 @@ fn handle_request(req: Request, broker: &Arc<Mutex<Broker>>) -> ResponseKind {
             topic,
             consumer_id,
             offset,
-        } => match broker.commit_offset(&topic, &consumer_id, offset) {
-            Ok(offset) => ResponseKind::Ok(SuccessBody {
-                data: SuccessType::Commit { offset },
-            }),
-            Err(e) => ResponseKind::Err(ResponseError { message: e.to_string() }),
-        },
-        Action::CreateTopic { name } => match broker.create_topic(&name) {
-            Ok(()) => ResponseKind::Ok(SuccessBody {
-                data: SuccessType::CreateTopic { name },
-            }),
-            Err(e) => ResponseKind::Err(ResponseError { message: e.to_string() }),
-        },
+        } => {
+            let mut broker = broker.lock().unwrap_or_else(|e| e.into_inner());
+            match broker.commit_offset(&topic, &consumer_id, offset) {
+                Ok(offset) => ResponseKind::Ok(SuccessBody {
+                    data: SuccessType::Commit { offset },
+                }),
+                Err(e) => ResponseKind::Err(ResponseError { message: e.to_string() }),
+            }
+        }
+        Action::CreateTopic { name } => {
+            let mut broker = broker.lock().unwrap_or_else(|e| e.into_inner());
+            match broker.create_topic(&name) {
+                Ok(()) => ResponseKind::Ok(SuccessBody {
+                    data: SuccessType::CreateTopic { name },
+                }),
+                Err(e) => ResponseKind::Err(ResponseError { message: e.to_string() }),
+            }
+        }
         Action::ListTopics => {
+            let broker = broker.lock().unwrap_or_else(|e| e.into_inner());
             let topics = broker.list_topics();
             ResponseKind::Ok(SuccessBody {
                 data: SuccessType::ListTopics { topics },
             })
         }
-        Action::DeleteTopic { name } => match broker.delete_topic(&name) {
-            Ok(()) => ResponseKind::Ok(SuccessBody {
-                data: SuccessType::DeleteTopic { name },
-            }),
-            Err(e) => ResponseKind::Err(ResponseError { message: e.to_string() }),
-        },
+        Action::DeleteTopic { name } => {
+            let mut broker = broker.lock().unwrap_or_else(|e| e.into_inner());
+            match broker.delete_topic(&name) {
+                Ok(()) => ResponseKind::Ok(SuccessBody {
+                    data: SuccessType::DeleteTopic { name },
+                }),
+                Err(e) => ResponseKind::Err(ResponseError { message: e.to_string() }),
+            }
+        }
         Action::Seek { topic, consumer_id, offset } => {
+            let mut broker = broker.lock().unwrap_or_else(|e| e.into_inner());
             match broker.seek(&topic, &consumer_id, offset) {
                 Ok(offset) => ResponseKind::Ok(SuccessBody {
                     data: SuccessType::Seek { offset },
