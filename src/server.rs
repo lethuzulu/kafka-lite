@@ -17,10 +17,8 @@ pub struct TcpServer {
 }
 
 impl TcpServer {
-    pub fn try_new(address: impl ToSocketAddrs) -> Result<Self> {
+    pub fn try_new(address: impl ToSocketAddrs, broker: Broker) -> Result<Self> {
         let inner = TcpListener::bind(address)?;
-
-        let broker = Broker::try_new("data", "offsets")?;
         let broker = Arc::new(Mutex::new(broker));
 
         println!("Tcp started...");
@@ -44,7 +42,13 @@ impl TcpServer {
 fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>) {
     let mut line = String::new();
 
-    let mut writer = stream.try_clone().unwrap();
+    let mut writer = match stream.try_clone() {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("failed to clone stream: {}", e);
+            return;
+        }
+    };
     let mut buf_reader = BufReader::new(stream);
 
     loop {
@@ -73,7 +77,7 @@ fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>) {
                     }
                 };
                 if let Err(e) = writer.write_all(res.as_bytes()) {
-                    eprintln!("failure to write to socket")
+                    eprintln!("failed to write to socket: {}", e);
                 }
                 line.clear();
                 continue;
@@ -89,16 +93,16 @@ fn handle_connection(stream: TcpStream, broker: Arc<Mutex<Broker>>) {
             }
         };
         if let Err(e) = writer.write_all(response.as_bytes()) {
-            eprintln!("failed to write the socker {}", e);
+            eprintln!("failed to write to socket: {}", e);
         }
         line.clear()
     }
 }
 
 fn handle_request(req: Request, broker: &Arc<Mutex<Broker>>) -> ResponseKind {
-    let mut broker = broker.lock().unwrap();
+    let mut broker = broker.lock().unwrap_or_else(|e| e.into_inner());
     match req.action {
-        Action::Write { topic, message } => match broker.append(topic, message) {
+        Action::Write { topic, payload } => match broker.append(&topic, &payload) {
             Ok(offset) => ResponseKind::Ok(SuccessBody {
                 data: SuccessType::Write { offset },
             }),
@@ -107,13 +111,19 @@ fn handle_request(req: Request, broker: &Arc<Mutex<Broker>>) -> ResponseKind {
             }),
         },
         Action::Read { topic, consumer_id } => {
-            let (messages, next_offset) = broker.read_from(&topic, &consumer_id);
-            ResponseKind::Ok(SuccessBody {
-                data: SuccessType::Read {
-                    messages,
-                    next_offset,
-                },
-            })
+            match broker.read_from(&topic, &consumer_id) {
+                Ok(r ) => {
+                    ResponseKind::Ok(SuccessBody {
+                        data: SuccessType::Read {
+                            messages: r.messages,
+                            next_offset: r.next_offset
+                        }
+                    })
+                }
+                Err(_) => {
+                    ResponseKind::Err(ResponseError {message: "topic or consumer_id does not exist".to_string()})
+                }
+            }
         }
         Action::Commit {
             topic,

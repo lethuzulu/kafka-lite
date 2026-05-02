@@ -1,4 +1,4 @@
-use anyhow::Result as AnyhowResult;
+use anyhow::Result;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -11,7 +11,7 @@ pub struct Request {
 pub enum Action {
     Write {
         topic: String,
-        message: Vec<u8>,
+        payload: Vec<u8>,
     },
     Read {
         topic: String,
@@ -22,8 +22,11 @@ pub enum Action {
         consumer_id: String,
         offset: u64,
     },
+    // CreateTopic {
+    //
+    // }
 }
 
-pub fn decode_request(req: &str) -> AnyhowResult<Request> {
+pub fn decode_request(req: &str) -> Result<Request> {
     Ok(serde_json::from_str(req)?)
 }
